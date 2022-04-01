@@ -7,23 +7,13 @@ start=`date +%s`
 
 # RHEL 8 - INITIAL SERVER CONFIGURATION
 
-# +------------------+----------------+--------------------------------------+
-# | IMPLEMENTED BY   | DATE           | VERSION                              |
-# +------------------+----------------+--------------------------------------+
-# | Profor Ivan      | 2021-01-10     | Initial version for CentOS 7         |
-# | Profor Ivan      | 2022-01-02     | 2nd version for Oracle Linux 8       |
-# | Profor Ivan      | 2022-01-14     | 3rd version for Oracle Linux 8       |
-# | Profor Ivan      | 2022-01-18     | 4th version for Oracle Linux 8       |
-# | Profor Ivan      | 2022-01-20     | 5th version for Oracle Linux 8       |
-# | Profor Ivan      | 2022-01-22     | 6th version for Oracle Linux 8       |
-# | Profor Ivan      | 2022-01-24     | 7th version for Oracle Linux 8       |
-# | Profor Ivan      | 2022-01-26     | 8th version for Oracle Linux 8       |
-# | Profor Ivan      | 2022-02-13     | 9th version for CentOS 8 Lightsail   |
-# | Profor Ivan      | 2022-02-19     | 10th version for CentOS 8 Lightsail  |
-# | Profor Ivan      | 2022-03-12     | 11th version for CentOS 8 Lightsail  |
-# | Profor Ivan      | 2022-03-22     | 12th version for RHEL 8 AWS EC2      |
-# | Profor Ivan      | 2022-03-23     | 13rd version for RHEL 8 AWS EC2 app1 |
-# +------------------+----------------+--------------------------------------+
+# +------------------+----------------+---------------------------------------------------+
+# | IMPLEMENTED BY   | DATE           | VERSION                                           |
+# +------------------+----------------+---------------------------------------------------+
+# | Profor Ivan      | 2022-03-12     | Based on the 11th version for CentOS 8 Lightsail  |
+# | Profor Ivan      | 2022-03-22     | 12th version for RHEL 8 AWS EC2                   |
+# | Profor Ivan      | 2022-03-23     | 13rd version for RHEL 8 AWS EC2 app1              |
+# +------------------+----------------+---------------------------------------------------+
 
 
 # SYNOPSIS

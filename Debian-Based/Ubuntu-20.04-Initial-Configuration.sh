@@ -5,25 +5,25 @@ start=`date +%s`
 
 # ATTENTION: run the script as root
 
-# RHEL 8 - INITIAL SERVER CONFIGURATION
+# Ubuntu 20.04 - INITIAL SERVER CONFIGURATION
 
 # +------------------+----------------+---------------------------------------------------+
 # | IMPLEMENTED BY   | DATE           | VERSION                                           |
 # +------------------+----------------+---------------------------------------------------+
-# | Profor Ivan      | 2022-03-12     | Based on the 11th version for CentOS 8 Lightsail  |
-# | Profor Ivan      | 2022-03-22     | 12th version for RHEL 8 AWS EC2                   |
+# | Profor Ivan      | 2022-03-12     | Based on the 9th version for Oracle Linux 8       |
+# | Profor Ivan      | 2022-03-29     | 1st version for Ubuntu 20.04                      |
 # +------------------+----------------+---------------------------------------------------+
 
 
 # SYNOPSIS
 # ----
 # - Configure history command to show the dates
-# - Removal of the subscription-manager and its dependencies
 # - Auditctl configuration
 # - Change of timezone
 # - Update/upgrade the system
 # - Configuration of SELinux
 # - Disable of IPv6 interface
+# - Configuration of Firewalld
 # - Installation of system administrator needed packages
 # - Change SSH default port and miscellaneous related to the sshd_config file:
     # BELOW ITEMS ARE OPTIONAL, HAS TO BE UNCOMMENTED
@@ -46,7 +46,7 @@ start=`date +%s`
 # - Installation of additional packages from EPEL
 # - Installation of Fish Shell
 # - NOT OPTIONAL: Addition of a secondary sudo user
-    # - NOT OPTIONAL: Insertion of the public SSH key
+    # NOT OPTIONAL: - Insertion of the public SSH key
 # - Installation of the fail2ban
 # - Configuration of the fail2ban
 # - Installation of the ClamAV
@@ -75,10 +75,7 @@ il="/root/installation.log"
 dstml="INSERT@EMAIL.HERE";
 
 # Secondary user public SSH key
-pk="INSERT THE SSH PUBLIC PAIR HERE";
-
-# The default CentOS user on AWS Lightsail is "centos"
-awsusr="ec2-user";
+pk="INSERT THE SSH KEY PUBLIC PAIR HERE";
 
 # ----
 
@@ -103,17 +100,14 @@ fi
 
 
 
-# Removal of the subscription-manager and its dependencies
-yum -y remove subscription-manager
-
-
-
 # Auditctl configuration
 
 # verify if the packages are installed (audit audit-libs)
-yum list installed audit* > /dev/null 2>&1
+apt list --installed |grep -w auditd > /dev/null 2>&1
 
-if [ $? == 0 ]; then
+if [ $? == 1 ]; then
+    # Installing
+    apt-get -y install auditd > /dev/null 2>&1
     # backing up the configuration file
     cp /etc/audit/rules.d/audit.rules /etc/audit/rules.d/audit.rules.orig
     # Add the following rules:
@@ -128,23 +122,20 @@ if [ $? == 0 ]; then
     auditctl -w /etc/audit/auditd.conf -p w -k unusual_auditd
     auditctl -w /etc/audit/audit.rules -p w -k unusual_auditrules
     auditctl -w /etc/ssh/sshd_config -p w -k unusual_sshd
-    auditctl -w /etc/sysconfig/iptables -p w -k unusual_iptables
+    # auditctl -w /etc/sysconfig/iptables -p w -k unusual_iptables
     # Make them permanent:
     auditctl -l >> /etc/audit/rules.d/audit.rules
-    echo "+ $(date +%H:%M:%S) - Auditctl - configured now." >> $il
-else 
-    echo "- $(date +%H:%M:%S) - Audit rules were not applied porbably because audit packages were not prior installed." >> $il
+    echo "+ $(date +%H:%M:%S) - Auditctl - installed and configured now." >> $il
 fi
 
 
 
 # Miscellaneous
-# Changing the hostname
-# Variables
-hstnm="INSERT THE HOSTNAME HERE";
+# mkdir -m 700 /root/.ssh
 
-hostnamectl set-hostname $hstnm
-echo "+ $(date +%H:%M:%S) - The hostname was set to $hstnm" >> $il
+# Insertion of the public SSH key into the root's directory
+echo $pk > /root/.ssh/authorized_keys
+
 
 
 
@@ -166,8 +157,7 @@ fi
 
 # Update/upgrade the system
 echo "+ $(date +%H:%M:%S) - Updating and upgrading the system ..." >> $il
-yum -y update && yum -y upgrade && yum -y check-update && yum -y clean all && yum -y autoremove;
-
+apt-get -y update && apt-get -y upgrade && apt-get -y dist-upgrade && apt-get -y full-upgrade && apt-get -y autoremove
 
 
 # Configuration of SELinux
@@ -208,6 +198,36 @@ fi
 # nmcli connection modify <INTERFACE> ipv6.method ignore
 
 # To apply the changes the machine should be rebooted.
+
+
+
+# Configuration of Firewalld
+# Delete unneeded allowed incoming services
+
+if [[ $(firewall-cmd --state|grep -w "running") ]]; then
+    echo "+ $(date +%H:%M:%S) - Firewalld is running." >> $il
+    if [[ $(firewall-cmd --get-default-zone|grep -w "public") ]]; then
+        echo "+ $(date +%H:%M:%S) - The default zone is: Public." >> $il
+        if [[ $(firewall-cmd --zone=public --list-all|grep -w "dhcpv6-client") ]]; then
+            firewall-cmd --zone=public --remove-service=dhcpv6-client --permanent;
+            firewall-cmd --reload;
+            echo "+ $(date +%H:%M:%S) - The 'dhcpv6-client' firewalld rule - deleted now." >> $il
+            if [[ $(firewall-cmd --zone=public --list-all|grep -w "cockpit") ]]; then
+                firewall-cmd --zone=public --remove-service=cockpit --permanent;
+                firewall-cmd --reload;
+                echo "+ $(date +%H:%M:%S) - The 'cockpit' firewalld rule - deleted now." >> $il
+            else
+                echo "- $(date +%H:%M:%S) - There is no 'cockpit' firewalld rule." >> $il
+            fi
+        else
+            echo "- $(date +%H:%M:%S) - There is no 'dhcpv6-client' firewalld rule." >> $il
+        fi
+    else
+        echo "- $(date +%H:%M:%S) - The default active zone is not 'Public'." >> $il
+    fi
+else
+    echo "- $(date +%H:%M:%S) - Firewalld is not running." >> $il
+fi
 
 
 
@@ -258,27 +278,14 @@ if [ $? == 0 ]; then
     semanage port -a -t ssh_port_t -p tcp $sshp
 
 
-    # # Disabling SSH root log in
+    # Disabling SSH root log in
     sed -i -re "s/^PermitRootLogin yes/PermitRootLogin no/" /etc/ssh/sshd_config
     echo "+ $(date +%H:%M:%S) - SSH root log in - disabled now." >> $il;
 
 
-    # Verify the authorized_keys file existence. The existence of the file is true only if the creation of the server was chosen with the insertion of a specific SSH key (in Lightsail web ui or cli)
-    ls /root/.ssh/authorized_keys > /dev/null 2>&1
-
-    if [ $? == 0 ]; then
-        # deleting the already inserted key by the Lightsail
-        echo > /root/.ssh/authorized_keys
-        echo "+ $(date +%H:%M:%S) - Deleting the already inserted root SSH key by the Lightsail." >> $il;
-    else
-        echo "- $(date +%H:%M:%S) - There is no /root/.ssh/authorized_keys file. The deletion of the SSH public key from the root folder is aborted." >> $il
-    fi
-
-
-    # ALREADY DISABLED - if the ssh key was used when creating the instance
     # Disabling SSH password authentication
-    # sed -i -re "s/^PasswordAuthentication yes/PasswordAuthentication no/" /etc/ssh/sshd_config
-    # echo "+ $(date +%H:%M:%S) - SSH password authentication - disabled now." >> $il;
+    sed -i -re "s/^PasswordAuthentication yes/PasswordAuthentication no/" /etc/ssh/sshd_config
+    echo "+ $(date +%H:%M:%S) - SSH password authentication - disabled now." >> $il;
 
 
     # Enabling SSH key authentication
@@ -313,6 +320,10 @@ if [ $? == 0 ]; then
     echo "+ $(date +%H:%M:%S) - Maximum number of concurrent authenticated SSH connections to $mxse - configured now." >> $il;
     
     systemctl restart sshd;
+
+    # Adding the incoming firewall rule for the $sshp port
+    firewall-cmd --zone=public --permanent --add-port=$sshp/tcp;
+    firewall-cmd --reload;
 
 else
     echo "- $(date +%H:%M:%S) - There is no /etc/ssh/sshd_config file. The SSHD was not reconfigured now." >> $il
@@ -354,27 +365,28 @@ fi
 # Installation of EPEL repository
 
 # Verifiyng the existence of the EPEL repo on the OS
-rpm -qa| grep epel > /dev/null 2>&1
-
-if [ $? == 1 ]; then
-    yum -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm;
-    yum -y update && yum -y upgrade && yum -y check-update;
+if [[ $(yum search epel|grep -w "oracle-epel-release-el8.x86_64") ]]; then
+    yum -y install oracle-epel-release-el8;
     echo "+ $(date +%H:%M:%S) - EPEL repository - installed now." >> $il;
 else
-    echo "+ $(date +%H:%M:%S) - The EPEL repository is already installed." >> $il
+    echo "- $(date +%H:%M:%S) - There is no packages for the EPEL repository found in the BaseOS repository." >> $il
 fi
+
+# or
+# yum -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm &&
+# yum -y update && yum -y upgrade && yum -y check-update &&
 
 
 # Update/upgrade the system
 echo "+ $(date +%H:%M:%S) - Updating and upgrading the system ..." >> $il
-yum -y update && yum -y upgrade && yum -y check-update && yum -y clean all && yum -y autoremove;
+apt-get -y update && apt-get -y upgrade && apt-get -y dist-upgrade && apt-get -y full-upgrade && apt-get -y autoremove
 
 
 
 # OPTIONAL - Installation of additional packages from EPEL
 
 # Verify if the EPEL repository is already installed in the OS
-rpm -qa| grep epel > /dev/null 2>&1
+yum list installed oracle-epel-release-el8 > /dev/null 2>&1
 
 if [ $? == 0 ]; then
 
@@ -460,12 +472,10 @@ chown -R $usr:$usr /home/$usr/.ssh
 
 
 
-# for l2tp-ipsec (https://github.com/hwdsl2/setup-ipsec-vpn) app to work, comment this block from here
-
 # OPTIONAL - Installation of the fail2ban
 
 # Verify if the EPEL repository is already installed in the OS
-rpm -qa| grep epel > /dev/null 2>&1
+yum list installed oracle-epel-release-el8 > /dev/null 2>&1
 
 if [ $? == 0 ]; then
     yum -y install fail2ban
@@ -514,202 +524,201 @@ else
     echo "- $(date +%H:%M:%S) - The fail2ban is not installed. Aborting it's configuration." >> $il
 fi
 
-# till here
 
 
-# # OPTIONAL - Installation of the clamav
+# OPTIONAL - Installation of the clamav
 
-# # Verify if the EPEL repository is already installed in the OS
-# yum list installed epel-release.noarch > /dev/null 2>&1
+# Verify if the EPEL repository is already installed in the OS
+yum list installed oracle-epel-release-el8 > /dev/null 2>&1
 
-# if [ $? == 0 ]; then
-#     # yum -y install clamav clamd clamav-update
-#     yum -y install clamd clamav-data clamav-update clamav-filesystem clamav clamav-devel clamav-lib
-#     echo "+ $(date +%H:%M:%S) - clamav clamd clamav-update - installed now." >> $il
+if [ $? == 0 ]; then
+    # yum -y install clamav clamd clamav-update
+    yum -y install clamd clamav-data clamav-update clamav-filesystem clamav clamav-devel clamav-lib
+    echo "+ $(date +%H:%M:%S) - clamav clamd clamav-update - installed now." >> $il
 
-#     # Adjust ClamAv with SELinux and give it access to all your files with the following command
-#     setsebool -P antivirus_can_scan_system 1
-# else
-#     echo "- $(date +%H:%M:%S) - The EPEL repository is not installed yet. Aborting the clamav installation." >> $il
-# fi
+    # Adjust ClamAv with SELinux and give it access to all your files with the following command
+    setsebool -P antivirus_can_scan_system 1
+else
+    echo "- $(date +%H:%M:%S) - The EPEL repository is not installed yet. Aborting the clamav installation." >> $il
+fi
 
 
-# # OPTIONAL - Configuration of the clamav
-# # source: https://www.golinuxcloud.com/steps-install-configure-clamav-antivirus-centos-linux/#Conclusion
+# OPTIONAL - Configuration of the clamav
+# source: https://www.golinuxcloud.com/steps-install-configure-clamav-antivirus-centos-linux/#Conclusion
 
-# yum list installed clamav > /dev/null 2>&1
+yum list installed clamav > /dev/null 2>&1
 
-# if [ $? == 0 ]; then
-#     # get the latest signatures in quiet mode
-#     freshclam --quiet;
-#     echo "+ $(date +%H:%M:%S) - clamav: freshclam latest signatures - done." >> $il
+if [ $? == 0 ]; then
+    # get the latest signatures in quiet mode
+    freshclam --quiet;
+    echo "+ $(date +%H:%M:%S) - clamav: freshclam latest signatures - done." >> $il
 
-#     # Configure auto-update of freshclam database
+    # Configure auto-update of freshclam database
     
-#     # Create the freshclam systemd timer unit file
-#     echo "[Unit]
-# Description=ClamAV virus database updater
-# After=network-online.target
+    # Create the freshclam systemd timer unit file
+    echo "[Unit]
+Description=ClamAV virus database updater
+After=network-online.target
 
-# [Timer]
-# OnCalendar=daily
-# Persistent=true
+[Timer]
+OnCalendar=daily
+Persistent=true
 
-# [Install]
-# WantedBy=timers.target" > /etc/systemd/system/clamav-freshclam.timer
+[Install]
+WantedBy=timers.target" > /etc/systemd/system/clamav-freshclam.timer
 
-#     # creating the clamav system unit with the "ExecStart=/usr/bin/freshclam" run without the " -d --foreground=true" option. Apparently that 
-#     echo "[Unit]
-# Description=ClamAV virus database updater
-# Documentation=man:freshclam(1) man:freshclam.conf(5) https://www.clamav.net/documents
-# # If user wants it run from cron, don't start the daemon.
-# ConditionPathExists=!/etc/cron.d/clamav-freshclam
-# Wants=network-online.target
-# After=network-online.target
+    # creating the clamav system unit with the "ExecStart=/usr/bin/freshclam" run without the " -d --foreground=true" option. Apparently that 
+    echo "[Unit]
+Description=ClamAV virus database updater
+Documentation=man:freshclam(1) man:freshclam.conf(5) https://www.clamav.net/documents
+# If user wants it run from cron, don't start the daemon.
+ConditionPathExists=!/etc/cron.d/clamav-freshclam
+Wants=network-online.target
+After=network-online.target
 
-# [Service]
-# ExecStart=/usr/bin/freshclam
-# StandardOutput=syslog
+[Service]
+ExecStart=/usr/bin/freshclam
+StandardOutput=syslog
 
-# [Install]
-# WantedBy=multi-user.target" > /etc/systemd/system/clamav-freshclam.service
+[Install]
+WantedBy=multi-user.target" > /etc/systemd/system/clamav-freshclam.service
 
-#     # Enable and start the clamav-freshclam.timer. We don't need to start and enable the service as timer will take care of that.
+    # Enable and start the clamav-freshclam.timer. We don't need to start and enable the service as timer will take care of that.
 
-#     systemctl enable clamav-freshclam.timer --now
-#     echo "+ $(date +%H:%M:%S) - clamav: freshclam timer - enabled and started." >> $il
+    systemctl enable clamav-freshclam.timer --now
+    echo "+ $(date +%H:%M:%S) - clamav: freshclam timer - enabled and started." >> $il
 
-#     # Verify
-#     # systemctl status clamav-freshclam.timer
+    # Verify
+    # systemctl status clamav-freshclam.timer
 
-#     # Verify the timer schedule
-#     # systemctl list-timers
+    # Verify the timer schedule
+    # systemctl list-timers
 
-#     # Backing up the configuration file
-#     cp /etc/clamd.d/scan.conf /etc/clamd.d/scan.conf.orig
+    # Backing up the configuration file
+    cp /etc/clamd.d/scan.conf /etc/clamd.d/scan.conf.orig
 
-#     # Changing clamav user to root
-#     sed -i "s/^User clamscan/User root/" /etc/clamd.d/scan.conf
+    # Changing clamav user to root
+    sed -i "s/^User clamscan/User root/" /etc/clamd.d/scan.conf
 
-#     # Enable LocalSocket
-#     sed -i 's/#LocalSocket \/run/LocalSocket \/run/g' /etc/clamd.d/scan.conf
-#     sed -i -re 's/^(\#)FixStaleSocket yes/FixStaleSocket yes/g' /etc/clamd.d/scan.conf
+    # Enable LocalSocket
+    sed -i 's/#LocalSocket \/run/LocalSocket \/run/g' /etc/clamd.d/scan.conf
+    sed -i -re 's/^(\#)FixStaleSocket yes/FixStaleSocket yes/g' /etc/clamd.d/scan.conf
 
    
-#     # Configure and start clamd.service
+    # Configure and start clamd.service
     
-#     # copy this file to /etc/systemd/system/clamd.service. I hope you are familiar with the different systemd service file locations so you can understand why I preferred this location instead of /usr/lib/systemd/system
-#     cp -ap /usr/lib/systemd/system/clamd@.service /etc/systemd/system/clamd.service
+    # copy this file to /etc/systemd/system/clamd.service. I hope you are familiar with the different systemd service file locations so you can understand why I preferred this location instead of /usr/lib/systemd/system
+    cp -ap /usr/lib/systemd/system/clamd@.service /etc/systemd/system/clamd.service
 
-#     # replace %i with scan.conf from both the Description and ExecStart options in
-#     sed -i 's/scanner (%i) daemon/scanner (scan.conf) daemon/g' /etc/systemd/system/clamd.service
-#     sed -i 's/\/etc\/clamd.d\/%i.conf/\/etc\/clamd.d\/scan.conf/g' /etc/systemd/system/clamd.service
+    # replace %i with scan.conf from both the Description and ExecStart options in
+    sed -i 's/scanner (%i) daemon/scanner (scan.conf) daemon/g' /etc/systemd/system/clamd.service
+    sed -i 's/\/etc\/clamd.d\/%i.conf/\/etc\/clamd.d\/scan.conf/g' /etc/systemd/system/clamd.service
 
-#     # Enable and start the clamd service
-#     systemctl enable clamd.service --now
-#     echo "+ $(date +%H:%M:%S) - clamav: clamd.service - enabled and started." >> $il
+    # Enable and start the clamd service
+    systemctl enable clamd.service --now
+    echo "+ $(date +%H:%M:%S) - clamav: clamd.service - enabled and started." >> $il
 
-#     # Verify
-#     # systemctl status clamd.service
-
-    
-#     # Scanning the whole system and placing all the infected files in a list
-#     # clamscan --recursive --no-summary --infected / 2>/dev/null | grep FOUND >> /root/clamav-first-full-scan.log;
+    # Verify
+    # systemctl status clamd.service
 
     
-#     # OPTIONAL - Configure periodic scan using clamdscan on a specfic directory
+    # Scanning the whole system and placing all the infected files in a list
+    # clamscan --recursive --no-summary --infected / 2>/dev/null | grep FOUND >> /root/clamav-first-full-scan.log;
 
-#     # Variables
-#     dir1="/home";
-#     cld="18:40:00";
+    
+    # OPTIONAL - Configure periodic scan using clamdscan on a specfic directory
 
-#     # create a new systemd service unit file
-#     echo "[Unit]
-# Description=ClamAV virus scan
-# Requires=clamd.service
-# After=clamd.service
+    # Variables
+    dir1="/home";
+    cld="18:40:00";
 
-# [Service]
-# ExecStart=/usr/bin/clamdscan $dir1
-# StandardOutput=syslog
+    # create a new systemd service unit file
+    echo "[Unit]
+Description=ClamAV virus scan
+Requires=clamd.service
+After=clamd.service
 
-# [Instal]
-# WantedBy=multi-user.target" > /etc/systemd/system/clamdscan-dir1.service
+[Service]
+ExecStart=/usr/bin/clamdscan $dir1
+StandardOutput=syslog
 
-#     # mapping timer unit file. Here I have added time value of 18:40 to start the scan:
+[Instal]
+WantedBy=multi-user.target" > /etc/systemd/system/clamdscan-dir1.service
 
-#     echo "[Unit]
-# Description=Scan $dir1 directory using ClamAV
+    # mapping timer unit file. Here I have added time value of 18:40 to start the scan:
 
-# [Timer]
-# OnCalendar=$cld
-# Persistent=true
+    echo "[Unit]
+Description=Scan $dir1 directory using ClamAV
 
-# [Install]
-# WantedBy=timers.target" > /etc/systemd/system/clamdscan-dir1.timer
+[Timer]
+OnCalendar=$cld
+Persistent=true
 
-#     # enable and start the timer
-#     systemctl enable clamdscan-dir1.timer --now
-#     echo "+ $(date +%H:%M:%S) - clamav: periodic scan at $cld of the $dir1 - enabled and started." >> $il
+[Install]
+WantedBy=timers.target" > /etc/systemd/system/clamdscan-dir1.timer
 
-#     # Verify
-#     # systemctl status clamdscan-dir1.timer
+    # enable and start the timer
+    systemctl enable clamdscan-dir1.timer --now
+    echo "+ $(date +%H:%M:%S) - clamav: periodic scan at $cld of the $dir1 - enabled and started." >> $il
 
-#     # Verify the timer schedule
-#     # systemctl list-timers
+    # Verify
+    # systemctl status clamdscan-dir1.timer
+
+    # Verify the timer schedule
+    # systemctl list-timers
 
 
-#     # OPTIONAL - Enable On-Access mode
-#     # source: https://www.adminbyaccident.com/security/how-to-install-the-clamav-antivirus-on-centos-8/
+    # OPTIONAL - Enable On-Access mode
+    # source: https://www.adminbyaccident.com/security/how-to-install-the-clamav-antivirus-on-centos-8/
 
-#     # stop the clamav service
-#     systemctl stop clamd.service
+    # stop the clamav service
+    systemctl stop clamd.service
 
-#     # enable the on-access module.
-#     sed -i 's/#OnAccessPrevention yes/OnAccessPrevention yes/g' /etc/clamd.d/scan.conf
+    # enable the on-access module.
+    sed -i 's/#OnAccessPrevention yes/OnAccessPrevention yes/g' /etc/clamd.d/scan.conf
 
-#     # Set the scanning of the "/home" directory
-#     sed -i 's/#OnAccessIncludePath \/home/OnAccessIncludePath \/home/g' /etc/clamd.d/scan.conf
+    # Set the scanning of the "/home" directory
+    sed -i 's/#OnAccessIncludePath \/home/OnAccessIncludePath \/home/g' /etc/clamd.d/scan.conf
 
-#     # exclude the clamav user to be scanned and looked after so it’s not blocked. In our case it is the root user
-#     sed -i 's/#OnAccessExcludeUname clamav/OnAccessExcludeUname root/g' /etc/clamd.d/scan.conf
+    # exclude the clamav user to be scanned and looked after so it’s not blocked. In our case it is the root user
+    sed -i 's/#OnAccessExcludeUname clamav/OnAccessExcludeUname root/g' /etc/clamd.d/scan.conf
 
-#     # add a systemd entry so it starts up automatically after reboots.
-#     cp /usr/lib/systemd/system/clamonacc.service /etc/systemd/system/clamonacc.service
+    # add a systemd entry so it starts up automatically after reboots.
+    cp /usr/lib/systemd/system/clamonacc.service /etc/systemd/system/clamonacc.service
 
-#     # After this block has been placed the log file and the quarantine directory must be created.
-#     touch /var/log/clamonacc
-#     mkdir /tmp/clamav-quarantine
+    # After this block has been placed the log file and the quarantine directory must be created.
+    touch /var/log/clamonacc
+    mkdir /tmp/clamav-quarantine
 
-#     # Before enabling this recently created entry on systemd let’s reload the tool.
-#     systemctl daemon-reload
+    # Before enabling this recently created entry on systemd let’s reload the tool.
+    systemctl daemon-reload
 
-#     systemctl enable clamonacc.service
+    systemctl enable clamonacc.service
 
-#     # Because clamonacc depends on clamd and I stopped it before making these changes I need to start it up again.
-#     systemctl start clamd.service
+    # Because clamonacc depends on clamd and I stopped it before making these changes I need to start it up again.
+    systemctl start clamd.service
 
-#     # Verify
-#     # systemctl status clamd.service
+    # Verify
+    # systemctl status clamd.service
 
-#     # Time to start the clamonacc.service service.
-#     systemctl start clamonacc.service
+    # Time to start the clamonacc.service service.
+    systemctl start clamonacc.service
 
-#     # Verify
-#     # systemctl status clamonacc.service
+    # Verify
+    # systemctl status clamonacc.service
 
-#     echo "+ $(date +%H:%M:%S) - clamav: On-Access mode - enabled and started." >> $il
+    echo "+ $(date +%H:%M:%S) - clamav: On-Access mode - enabled and started." >> $il
 
-# else
-#     echo "- $(date +%H:%M:%S) - The clamav packages are not installed. Aborting it's configuration." >> $il
-# fi
+else
+    echo "- $(date +%H:%M:%S) - The clamav packages are not installed. Aborting it's configuration." >> $il
+fi
 
 
 
 # OPTIONAL - Installation of the rkhunter
 
 # Verify if the EPEL repository is already installed in the OS
-yum list installed epel-release.noarch > /dev/null 2>&1
+yum list installed oracle-epel-release-el8 > /dev/null 2>&1
 
 if [ $? == 0 ]; then
     yum -y install rkhunter
@@ -780,7 +789,7 @@ if [ $? == 0 ]; then
     # Backup the configuration file
     cp /etc/systemd/logind.conf /etc/systemd/logind.conf.orig
     
-    # sed -i -re "s/^(\#)NAutoVTs=6/NAutoVTs=0/" /etc/systemd/logind.conf
+    sed -i -re "s/^(\#)NAutoVTs=6/NAutoVTs=0/" /etc/systemd/logind.conf
     sed -i -re "s/^(\#)ReserveVT=6/ReserveVT=N/" /etc/systemd/logind.conf
     echo "+ $(date +%H:%M:%S) - Allow single TTY - configured now." >> $il
     # reboot the instance for the changes to take effect
@@ -794,7 +803,7 @@ fi
 # source: https://www.digitalocean.com/community/tutorials/how-to-set-up-multi-factor-authentication-for-ssh-on-centos-8
 
 # Verify if the EPEL repository is already installed in the OS
-rpm -qa| grep epel > /dev/null 2>&1
+yum list installed oracle-epel-release-el8 > /dev/null 2>&1
 
 if [ $? == 0 ]; then
     yum -y install google-authenticator qrencode-libs
@@ -864,12 +873,6 @@ fi
 
 
 
-# Delete the default Lightsail user 'centos'
-# -r with the homoe folder, -f force even if logged 
-userdel -rf $awsusr
-
-
-
 # # reboot the instance for the changes to take effect
 # echo "+ $(date +%H:%M:%S) - Rebooting." >> $il
 # reboot
@@ -892,3 +895,8 @@ echo -e "\nThe script was executed in $runtime minutes"|sed 's/\./,/1' >> $il
 
 # ----
 # THE END OF THE SCRIPT
+
+
+
+# TO DO
+# Verify systemctl status clamonacc.service for several days
