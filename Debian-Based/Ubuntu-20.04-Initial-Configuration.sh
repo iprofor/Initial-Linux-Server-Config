@@ -157,7 +157,7 @@ fi
 
 # Update/upgrade the system
 echo "+ $(date +%H:%M:%S) - Updating and upgrading the system ..." >> $il
-apt-get -y update && apt-get -y upgrade && apt-get -y dist-upgrade && apt-get -y full-upgrade && apt-get -y autoremove
+apt-get -y update && apt-get -y upgrade && apt-get -y dist-upgrade && apt-get -y full-upgrade && apt-get -y autoremove  
 
 
 # Configuration of SELinux
